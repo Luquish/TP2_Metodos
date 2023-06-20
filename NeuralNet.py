@@ -18,7 +18,8 @@ class NeuralNet:
         self.W2: ndarray = np.random.random((1, 5))
         self.b2: ndarray = np.random.random((1, 1))
 
-        self.loss_acum: List[float] = []
+        self.training_loss_acum: List[float] = []
+        self.testing_loss_acum: List[float] = []
 
     def sigmoid(self, x: ndarray) -> ndarray:
         """
@@ -40,7 +41,10 @@ class NeuralNet:
         self.a2 = self.z2
         return self.a2.reshape(-1, 1)
 
-    def numerical_gradient(self, x: ndarray, y: ndarray, eps: float) -> ndarray:
+    def numerical_gradient(
+        self, x: ndarray, y: ndarray, eps: float, dropout: bool = False,
+        dropout_prob: float = 0.5
+    ) -> Tuple[ndarray, ndarray, ndarray, ndarray]:
         """
         Una estrategia para calcular estas derivadas parciales,
         consiste en calcular el promedio de los cocientes incrementales
@@ -60,55 +64,69 @@ class NeuralNet:
         dW2 = np.zeros_like(self.W2)
         db2 = np.zeros_like(self.b2)
 
-        temp_w1 = self.W1.copy()
-        self.W1 = self.dropout(self.W1, 0.3)
-        temp_b1 = self.b1.copy()
-        self.b1 = self.dropout(self.b1, 0.3)
-        temp_w2 = self.W2.copy()
-        self.W2 = self.dropout(self.W2, 0.3)
-        temp_b2 = self.b2.copy()
-        self.b2 = self.dropout(self.b2, 0.3)
+        if dropout:
+            temp_w1 = self.W1.copy()
+            self.W1 = self.dropout(self.W1, dropout_prob)
+            temp_b1 = self.b1.copy()
+            self.b1 = self.dropout(self.b1, dropout_prob)
+            temp_w2 = self.W2.copy()
+            self.W2 = self.dropout(self.W2, dropout_prob)
+            temp_b2 = self.b2.copy()
+            self.b2 = self.dropout(self.b2, dropout_prob)
 
         for i in range(self.W1.shape[0]):
             for j in range(self.W1.shape[1]):
+                if dropout:
+                    if self.W1[i, j] == 0 and temp_w1[i, j] != 0:
+                        continue
                 self.W1[i, j] += eps
-                loss1 = self.loss(x, y, dropout=True)
+                loss1 = self.loss(x, y)
                 self.W1[i, j] -= 2 * eps
-                loss2 = self.loss(x, y, dropout=True)
+                loss2 = self.loss(x, y)
                 dW1[i, j] = (loss1 - loss2) / (2 * eps)
                 self.W1[i, j] += eps
 
         for i in range(self.b1.shape[0]):
             for j in range(self.b1.shape[1]):
+                if dropout:
+                    if self.b1[i, j] == 0 and temp_b1[i, j] != 0:
+                        continue
                 self.b1[i, j] += eps
-                loss1 = self.loss(x, y, dropout=True)
+                loss1 = self.loss(x, y)
                 self.b1[i, j] -= 2 * eps
-                loss2 = self.loss(x, y, dropout=True)
+                loss2 = self.loss(x, y)
                 db1[i, j] = (loss1 - loss2) / (2 * eps)
                 self.b1[i, j] += eps
 
         for i in range(self.W2.shape[0]):
             for j in range(self.W2.shape[1]):
+                if dropout:
+                    if self.W2[i, j] == 0 and temp_w2[i, j] != 0:
+                        continue
                 self.W2[i, j] += eps
-                loss1 = self.loss(x, y, dropout=True)
+                loss1 = self.loss(x, y)
                 self.W2[i, j] -= 2 * eps
-                loss2 = self.loss(x, y, dropout=True)
+                loss2 = self.loss(x, y)
                 dW2[i, j] = (loss1 - loss2) / (2 * eps)
                 self.W2[i, j] += eps
 
         for i in range(self.b2.shape[0]):
             for j in range(self.b2.shape[1]):
+                if dropout:
+                    if self.b2[i, j] == 0 and temp_b2[i, j] != 0:
+                        continue
                 self.b2[i, j] += eps
-                loss1 = self.loss(x, y, dropout=True)
+                loss1 = self.loss(x, y)
                 self.b2[i, j] -= 2 * eps
-                loss2 = self.loss(x, y, dropout=True)
+                loss2 = self.loss(x, y)
                 db2[i, j] = (loss1 - loss2) / (2 * eps)
                 self.b2[i, j] += eps
 
-        self.W1 = temp_w1
-        self.b1 = temp_b1
-        self.W2 = temp_w2
-        self.b2 = temp_b2
+        if dropout:
+            self.W1 = temp_w1
+            self.b1 = temp_b1
+            self.W2 = temp_w2
+            self.b2 = temp_b2
 
         return dW1, db1, dW2, db2
 
@@ -146,8 +164,10 @@ class NeuralNet:
 
         return np.power((self.forward(x, dropout=dropout) - y), 2).mean(axis=0) / 2
 
-    def record_metrics(self, x: ndarray, y: ndarray):
-        self.loss_acum.append(self.loss(x, y))
+    def record_metrics(self, x: ndarray, y: ndarray, x_test: ndarray, y_test: ndarray):
+
+        self.training_loss_acum.append(self.loss(x, y))
+        self.test_loss_acum.append(self.loss(x_test, y_test))
 
     def fit(
         self,
@@ -158,20 +178,28 @@ class NeuralNet:
         lr: float = 0.01,
         epochs: int = 1000,
         eps: float = 1e-3,
+        dropout: bool = False,
+        dropout_prob: float = 0.5,
     ) -> List[float]:
         """
         Entrena la red neuronal usando gradient descent.
         """
 
+        self.train_loss_acum = []
+        self.test_loss_acum = []
+
+        self.lr = lr
+        self.epochs = epochs
+        self.eps = eps
+
         # for _ in tqdm(range(epochs)):
         for _ in range(epochs):
-            self.record_metrics(x, y)
+            self.record_metrics(x, y, x_test, y_test)
 
-            dW1, db1, dW2, db2 = self.numerical_gradient(x, y, eps)
+            dW1, db1, dW2, db2 = self.numerical_gradient(x, y, eps, dropout=dropout, dropout_prob=dropout_prob)
 
             self.update_weights(lr, dW1, db1, dW2, db2)
-
-        return self.loss_acum
+        return self.train_loss_acum
 
     def predict(self, x: ndarray) -> ndarray:
         """
@@ -186,12 +214,33 @@ class NeuralNet:
 
         return self.W1, self.b1, self.W2, self.b2
 
-    def get_loss(self) -> List[float]:
+    def get_training_loss(self) -> List[float]:
         """
         Devuelve el error cuadrático medio acumulado.
         """
 
-        return self.loss_acum
+        return self.training_loss_acum
+
+    def get_test_loss(self) -> List[float]:
+
+        return self.test_loss_acum
+
+    def plot_loss(self, ax: plt.Axes = None):
+
+        if ax is None:
+            _, ax = plt.subplots()
+
+        ax.plot(
+            range(len(self.training_loss_acum)),
+            self.training_loss_acum,
+            label="Training Loss",
+        )
+        ax.plot(range(len(self.test_loss_acum)), self.test_loss_acum, label="Test Loss")
+        ax.legend()
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title("Loss vs Epoch, lr = {}, $\epsilon$ = {}".format(self.lr, self.eps))
+        plt.show()
 
     def mse(self, y_true: ndarray, x_test: ndarray) -> float:
         """
