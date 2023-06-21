@@ -31,19 +31,24 @@ class NeuralNet:
         """
         Calcula la salida de la red neuronal.
         """
-        self.z1 = self.W1 @ x.T + self.b1
+
+        self.z1 = self.W1 @ x.T + self.b1.repeat(x.shape[0], axis=1)
         self.a1 = self.sigmoid(self.z1)
 
         # if dropout:
         #    self.a1 = self.dropout(self.a1, 0.5)
 
-        self.z2 = self.W2 @ self.a1 + self.b2
+        self.z2 = self.W2 @ self.a1 + self.b2.repeat(self.a1.shape[1], axis=1)
         self.a2 = self.z2
         return self.a2.reshape(-1, 1)
 
     def numerical_gradient(
-        self, x: ndarray, y: ndarray, eps: float, dropout: bool = False,
-        dropout_prob: float = 0.5
+        self,
+        x: ndarray,
+        y: ndarray,
+        eps: float,
+        dropout: bool = False,
+        dropout_prob: float = 0.5,
     ) -> Tuple[ndarray, ndarray, ndarray, ndarray]:
         """
         Una estrategia para calcular estas derivadas parciales,
@@ -191,12 +196,16 @@ class NeuralNet:
         self.lr = lr
         self.epochs = epochs
         self.eps = eps
+        self.with_dropout = dropout
+        self.dropout_prob = dropout_prob
 
         # for _ in tqdm(range(epochs)):
         for _ in range(epochs):
             self.record_metrics(x, y, x_test, y_test)
 
-            dW1, db1, dW2, db2 = self.numerical_gradient(x, y, eps, dropout=dropout, dropout_prob=dropout_prob)
+            dW1, db1, dW2, db2 = self.numerical_gradient(
+                x, y, eps, dropout=dropout, dropout_prob=dropout_prob
+            )
 
             self.update_weights(lr, dW1, db1, dW2, db2)
         return self.train_loss_acum
@@ -239,7 +248,16 @@ class NeuralNet:
         ax.legend()
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Loss")
-        ax.set_title("Loss vs Epoch, lr = {}, $\epsilon$ = {}".format(self.lr, self.eps))
+        ax.set_title(
+            "Loss vs Epoch, lr = {}, $\epsilon$ = {}".format(self.lr, self.eps)
+        )
+        # If dropout is used, add it to the title
+        if self.with_dropout:
+            ax.set_title(
+                "Loss vs Epoch, lr = {}, $\epsilon$ = {}, dropout_prob = {}".format(
+                    self.lr, self.eps, self.dropout_prob
+                )
+            )
         plt.show()
 
     def mse(self, y_true: ndarray, x_test: ndarray) -> float:
@@ -265,7 +283,7 @@ class NeuralNet:
         for i in range(5):
             for j in range(5):
                 G.add_edge(f"x{i+1}", f"z1_x{j+1}", weight=self.W1[i, j])
-                G.add_edge(f"z1_x{j+1}", f"y", weight=1)
+                G.add_edge(f"z1_x{j+1}", "y", weight=1)
 
         pos = {
             "x1": (0, 0),
